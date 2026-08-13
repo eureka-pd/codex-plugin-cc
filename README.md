@@ -84,7 +84,7 @@ GPT-5.6 uses three durable capability tiers. Treat `Sol > Terra > Luna` as the b
 
 Reasoning effort is a separate inference-budget dimension. A higher effort on a lower tier can improve realized performance for a task, but it does not reverse the underlying tier ordering. The plugin leaves model and effort unset unless you select them, so your Codex configuration remains authoritative.
 
-The companion accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and `ultra` as transport values and asks the current Codex model catalog to validate the selected combination. Availability can vary by model, Codex version, account, and plan.
+The companion accepts `none`, `low`, `medium`, `high`, `xhigh`, `max`, and `ultra` as transport values and asks the current Codex model catalog to validate the selected combination. Availability can vary by model, Codex version, account, and plan.
 
 ## Usage
 
@@ -167,7 +167,6 @@ Examples:
 /codex:rescue --background investigate the regression
 ```
 
-Legacy model names remain pass-through values. For example, `/codex:rescue --model gpt-5.4-mini --effort medium investigate the flaky integration test` remains valid when that model is available to the installed Codex runtime.
 
 You can also just ask for a task to be delegated to Codex:
 
@@ -178,11 +177,10 @@ Ask Codex to redesign the database connection to be more resilient.
 **Notes:**
 
 - if you do not pass `--model` or `--effort`, Codex chooses its own defaults.
-- if you say `spark`, the plugin maps that to `gpt-5.3-codex-spark`
-- reasoning efforts are `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and `ultra`; the current Codex model catalog validates explicit combinations
+- if you say `spark`, the plugin maps that to `gpt-5.6-luna`
+- reasoning efforts are `none`, `low`, `medium`, `high`, `xhigh`, `max`, and `ultra`; the current Codex model catalog validates explicit combinations
 - model names are otherwise passed through, so custom providers and newly released models are not blocked by a plugin allowlist
 - follow-up rescue requests can continue the latest Codex task in the repo
-- the rescue subagent uses the version-neutral `codex-prompting` skill; `gpt-5-4-prompting` remains only as a compatibility alias
 
 ### `/codex:transfer`
 
@@ -299,7 +297,6 @@ model = "gpt-5.6-terra"
 model_reasoning_effort = "high"
 ```
 
-Older configurations such as `model = "gpt-5.4-mini"` remain pass-through values and can still be used while the installed Codex runtime and account support them.
 
 Your configuration will be picked up based on:
 

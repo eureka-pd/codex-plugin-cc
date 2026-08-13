@@ -26,7 +26,9 @@ const readline = require("node:readline");
 	}
 
 function saveState(state) {
-  fs.writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
+  const tempPath = STATE_PATH + "." + process.pid + "." + crypto.randomUUID() + ".tmp";
+  fs.writeFileSync(tempPath, JSON.stringify(state, null, 2));
+  fs.renameSync(tempPath, STATE_PATH);
 }
 
 function requiresExperimental(field, message, state) {
@@ -346,7 +348,7 @@ rl.on("line", (line) => {
 	            : BEHAVIOR === "inherited-default-luna-ultra"
               ? { model: "gpt-5.6-luna", effort: "ultra" }
 	            : null;
-	        const selectedModel = message.params.model || inheritedSelection?.model || "gpt-5.4";
+	        const selectedModel = message.params.model || inheritedSelection?.model || "gpt-5.6-terra";
 	        const selectedEffort = message.params.config?.model_reasoning_effort || inheritedSelection?.effort || null;
 	        const modelProvider = BEHAVIOR === "custom-provider" ? "custom" : "openai";
 	        thread.model = selectedModel;
@@ -392,7 +394,7 @@ rl.on("line", (line) => {
         const thread = ensureThread(state, message.params.threadId);
         thread.updatedAt = now();
         saveState(state);
-	        const selectedModel = message.params.model || thread.model || "gpt-5.4";
+	        const selectedModel = message.params.model || thread.model || "gpt-5.6-terra";
 	        const selectedEffort = BEHAVIOR === "inherited-sol-max" ? "max" : thread.reasoningEffort || null;
 	        state.lastThreadResume = {
 	          model: selectedModel,
