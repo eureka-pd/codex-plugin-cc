@@ -81,6 +81,7 @@ test("continue is not exposed as a user-facing command", () => {
   assert.deepEqual(commandFiles, [
     "adversarial-review.md",
     "cancel.md",
+    "orchestrate.md",
     "rescue.md",
     "result.md",
     "review.md",
@@ -178,15 +179,18 @@ test("transfer, result, and cancel commands are exposed as deterministic runtime
   const transfer = read("commands/transfer.md");
   const result = read("commands/result.md");
   const cancel = read("commands/cancel.md");
+  const dispatcher = read("scripts/orchestration/dispatch.mjs");
   const resultHandling = read("skills/codex-result-handling/SKILL.md");
 
   assert.match(transfer, /disable-model-invocation:\s*true/);
   assert.match(transfer, /codex-companion\.mjs" transfer "\$ARGUMENTS"/);
   assert.match(transfer, /codex resume <session-id>/);
   assert.match(result, /disable-model-invocation:\s*true/);
-  assert.match(result, /codex-companion\.mjs" result "\$ARGUMENTS"/);
+  assert.match(result, /orchestration\/dispatch\.mjs" result "\$ARGUMENTS"/);
   assert.match(cancel, /disable-model-invocation:\s*true/);
-  assert.match(cancel, /codex-companion\.mjs" cancel "\$ARGUMENTS"/);
+  assert.match(cancel, /orchestration\/dispatch\.mjs" cancel "\$ARGUMENTS"/);
+  assert.match(dispatcher, /codex-companion\.mjs/);
+  assert.match(dispatcher, /orchestration.*cli\.mjs/);
   assert.match(resultHandling, /do not turn a failed or incomplete Codex run into a Claude-side implementation attempt/i);
   assert.match(resultHandling, /if Codex was never successfully invoked, do not generate a substitute answer at all/i);
 });
@@ -218,10 +222,11 @@ test("setup command can offer Codex install and still points users to codex logi
   const setup = read("commands/setup.md");
   const readme = fs.readFileSync(path.join(ROOT, "README.md"), "utf8");
 
-  assert.match(setup, /argument-hint:\s*'\[--enable-review-gate\|--disable-review-gate\]'/);
+  assert.match(setup, /argument-hint:\s*'\[--enable-review-gate\|--disable-review-gate\] \[--enable-orchestration\|--disable-orchestration\]'/);
   assert.match(setup, /AskUserQuestion/);
   assert.match(setup, /npm install -g @openai\/codex/);
-  assert.match(setup, /codex-companion\.mjs" setup --json \$ARGUMENTS/);
+  assert.match(setup, /orchestration\/setup-dispatch\.mjs" --json \$ARGUMENTS/);
+  assert.match(read("scripts/orchestration/setup-dispatch.mjs"), /codex-companion\.mjs.*setup/);
   assert.match(readme, /!codex login/);
   assert.match(readme, /offer to install Codex for you/i);
   assert.match(readme, /\/codex:setup --enable-review-gate/);

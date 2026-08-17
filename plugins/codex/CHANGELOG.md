@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add read-only Claude-native Multi-Codex orchestration with durable status, results, cancellation, adaptive budgets, and bounded parallel workers.
+
 ## 1.0.7-eureka.2
 
 - Added GPT-5.6 Sol, Terra, and Luna model/effort support based on the current Codex model catalog.
