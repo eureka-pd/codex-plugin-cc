@@ -1,0 +1,47 @@
+name: Apply Phase 1 Implementation
+
+on:
+  push:
+    branches:
+      - feat/claude-native-multi-codex-phase-1
+    paths:
+      - .github/workflows/apply-phase1-implementation.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-phase1-implementation
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct and apply verified patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .github/phase1-patch/part-* > /tmp/phase1.patch.gz.b64
+          base64 --decode /tmp/phase1.patch.gz.b64 | gzip --decompress > /tmp/phase1.patch
+          echo "be6c9f74653c422ce50793c7ed41bd9c1044a50bb8645303828c3101d8dcbc6f  /tmp/phase1.patch" | sha256sum --check -
+          git apply --index /tmp/phase1.patch
+          rm -rf .github/phase1-patch
+          rm .github/workflows/apply-phase1-implementation.yml
+          git add -A
+          git diff --cached --check
+
+      - name: Commit and push implementation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "feat: add read-only Multi-Codex orchestration"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
