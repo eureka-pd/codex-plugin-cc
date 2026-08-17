@@ -339,3 +339,45 @@ Yes. If you already use Codex, the plugin picks up the same [configuration](#com
 Yes. Because the plugin uses your local Codex CLI, your existing sign-in method and config still apply.
 
 If you need to point the built-in OpenAI provider at a different endpoint, set `openai_base_url` in your [Codex config](https://developers.openai.com/codex/config-advanced/#config-and-state-locations).
+
+## Claude-Native Multi-Codex Orchestration — Read-only Phase 1
+
+`/codex:orchestrate <task>` lets Claude Root decompose a repository investigation into independent read-only Codex Root packages, schedule them through a bounded worker pool, and persist package evidence and results.
+
+```bash
+/codex:orchestrate investigate the cache regression and independently challenge the concurrency assumptions
+/codex:status orch-...
+/codex:result orch-...
+/codex:cancel orch-...
+```
+
+Automatic entry is disabled by default:
+
+```bash
+/codex:setup --enable-orchestration
+/codex:setup --disable-orchestration
+```
+
+The default workspace pool size is 3 and may be configured from 1–8. The default plugin-wide top-level Root limit is 8 and the active Codex limit, including observed native children, is 12. Model routing follows `Sol > Terra > Luna`, with reasoning effort as a separate dimension.
+
+Phase 1 is read-only: package results must report no changed files. Writer worktrees, integration branches, and automatic Git integration are Phase 2.
+
+## Claude-native Multi-Codex orchestration
+
+Phase 1 adds a read-only orchestration layer managed by the Claude root agent. It can run independent Codex Roots concurrently through separate App Server workers, persist their package results, and expose orchestration-aware status, result, and cancellation commands.
+
+```text
+/codex:orchestrate <repository task>
+/codex:status <orchestration-id|package-id>
+/codex:result <orchestration-id|package-id>
+/codex:cancel <orchestration-id|package-id>
+```
+
+Automatic entry is disabled by default:
+
+```text
+/codex:setup --enable-orchestration
+/codex:setup --disable-orchestration
+```
+
+The default workspace pool size is 3 and may be configured from 1 to 8. The plugin-wide top-level Root limit is 8 and the active Codex limit, including native children, is 12. Phase 1 is strictly read-only: writer worktrees, snapshot refs, integration branches, automatic commits, and Git integration are Phase 2 work.

@@ -23,6 +23,7 @@
  *   finalAnswerSeen: boolean,
  *   pendingCollaborations: Set<string>,
  *   activeSubagentTurns: Set<string>,
+ *   nativeChildPeak: number,
  *   completionTimer: ReturnType<typeof setTimeout> | null,
  *   lastAgentMessage: string,
  *   reviewText: string,
@@ -319,6 +320,7 @@ function createTurnCaptureState(threadId, options = {}) {
     finalAnswerSeen: false,
     pendingCollaborations: new Set(),
     activeSubagentTurns: new Set(),
+    nativeChildPeak: 0,
     completionTimer: null,
     lastAgentMessage: "",
     reviewText: "",
@@ -502,6 +504,7 @@ function applyTurnNotification(state, message) {
       state.threadTurnIds.set(message.params.threadId, message.params.turn.id);
       if ((message.params.threadId ?? null) !== state.threadId) {
         state.activeSubagentTurns.add(message.params.threadId);
+        state.nativeChildPeak = Math.max(state.nativeChildPeak, state.activeSubagentTurns.size);
       }
       emitProgress(
         state.onProgress,
@@ -1097,13 +1100,12 @@ export async function importExternalAgentSession(cwd, options = {}) {
   });
 }
 
-export async function runAppServerTurn(cwd, options = {}) {
+export async function runAppServerTurnWithClient(client, cwd, options = {}) {
   const availability = getCodexAvailability(cwd);
   if (!availability.available) {
     throw new Error("Codex CLI is not installed or is missing required runtime support. Install it with `npm install -g @openai/codex`, then rerun `/codex:setup`.");
   }
 
-  return withAppServer(cwd, async (client) => {
     let threadId;
     let threadSelection;
 
@@ -1167,6 +1169,9 @@ export async function runAppServerTurn(cwd, options = {}) {
       status: buildResultStatus(turnState),
       threadId,
       turnId: turnState.turnId,
+      threadIds: [...turnState.threadIds],
+      nativeChildThreadIds: [...turnState.threadIds].filter((candidate) => candidate !== threadId),
+      nativeChildPeak: turnState.nativeChildPeak,
       finalMessage: turnState.lastAgentMessage,
       reasoningSummary: turnState.reasoningSummary,
       turn: turnState.finalTurn,
@@ -1176,9 +1181,17 @@ export async function runAppServerTurn(cwd, options = {}) {
       touchedFiles: collectTouchedFiles(turnState.fileChanges),
       commandExecutions: turnState.commandExecutions
     };
-  });
+
 }
 
+export async function runAppServerTurn(cwd, options = {}) {
+  const availability = getCodexAvailability(cwd);
+  if (!availability.available) {
+    throw new Error("Codex CLI is not installed or is missing required runtime support. Install it with `npm install -g @openai/codex`, then rerun `/codex:setup`.");
+  }
+
+  return withAppServer(cwd, (client) => runAppServerTurnWithClient(client, cwd, options));
+}
 export async function findLatestTaskThread(cwd) {
   const availability = getCodexAvailability(cwd);
   if (!availability.available) {
