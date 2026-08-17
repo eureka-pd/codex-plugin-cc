@@ -1,6 +1,6 @@
 name: Apply Phase 1 Implementation
 
-# The reconstructed Base64 length and every corrected blob now match the verified local source.
+# Apply the verified patch and normalize the one known trailing blank line.
 on:
   push:
     branches:
@@ -35,6 +35,11 @@ jobs:
           base64 --decode /tmp/phase1.patch.gz.b64 | gzip --decompress > /tmp/phase1.patch
           echo "be6c9f74653c422ce50793c7ed41bd9c1044a50bb8645303828c3101d8dcbc6f  /tmp/phase1.patch" | sha256sum --check -
           git apply --index /tmp/phase1.patch
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("tests/orchestration-worker.test.mjs")
+          path.write_text(path.read_text().rstrip("\n") + "\n")
+          PY
           rm -rf .github/phase1-patch
           rm .github/workflows/apply-phase1-implementation.yml
           git add -A
