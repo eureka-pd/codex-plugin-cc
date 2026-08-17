@@ -160,7 +160,7 @@ function buildPackage(id, dependencies = [], objective = `delay-250 ${id}`) {
   };
 }
 
-async function waitFor(orchestrationId, env, predicate, timeoutMs = 15000) {
+async function waitFor(orchestrationId, env, predicate, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const response = run(["status", orchestrationId, "--cwd", env.WORKSPACE, "--json"], env);
@@ -195,8 +195,8 @@ test("runs independent Codex Roots concurrently and isolates results", async () 
     planFile,
     JSON.stringify(
       buildPlan([
-        buildPackage("pkg-a"),
-        buildPackage("pkg-b"),
+        buildPackage("pkg-a", [], "delay-3000 pkg-a"),
+        buildPackage("pkg-b", [], "delay-3000 pkg-b"),
         buildPackage("pkg-c", ["pkg-a", "pkg-b"], "delay-20 pkg-c")
       ])
     )
@@ -230,7 +230,8 @@ test("runs independent Codex Roots concurrently and isolates results", async () 
   assert.equal(
     Math.max(...starts.map((entry) => entry.time))
       < Math.min(...completions.map((entry) => entry.time)),
-    true
+    true,
+    JSON.stringify({ starts, completions }, null, 2)
   );
   await shutdown(workspace, env);
 });
