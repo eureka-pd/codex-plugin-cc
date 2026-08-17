@@ -1,4 +1,4 @@
-name: Clean Phase 1 README Once
+name: Verify Merged Phase 1 Main Commit
 
 on:
   push:
@@ -6,39 +6,63 @@ on:
       - tmp/export-phase1-source
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  clean:
-    runs-on: ubuntu-latest
+  verify:
+    name: Verify ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+
     steps:
-      - name: Check out feature branch
+      - name: Check out exact main commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: feat/claude-native-multi-codex-phase-1
+          ref: 3444f60f4a124b2b24df654e5df6787b8478ab8d
           fetch-depth: 0
 
-      - name: Remove duplicate README section
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path("README.md")
-          source = path.read_text(encoding="utf-8")
-          marker = "\n## Claude-native Multi-Codex orchestration\n"
-          if source.count(marker) != 1:
-              raise RuntimeError(f"Expected one duplicate marker, found {source.count(marker)}")
-          path.write_text(source[:source.index(marker)].rstrip() + "\n", encoding="utf-8")
-          PY
-          git diff --check
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 22
+          cache: npm
 
-      - name: Commit cleanup
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install current Codex CLI
+        run: npm install -g @openai/codex
+
+      - name: Verify version metadata
+        run: npm run check-version
+
+      - name: Run full test suite
+        run: npm test
+
+      - name: Run type-check build
+        run: npm run build
+
+      - name: Verify merged tree and Phase 1 boundary
+        if: ${{ matrix.os == 'ubuntu-latest' }}
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add README.md
-          git commit -m "docs: remove duplicate Phase 1 overview"
-          git push origin HEAD:refs/heads/feat/claude-native-multi-codex-phase-1
+          test "$(git rev-parse HEAD)" = "3444f60f4a124b2b24df654e5df6787b8478ab8d"
+          git diff --check HEAD^ HEAD
+          test -s plugins/codex/scripts/orchestration/controller.mjs
+          test -s plugins/codex/scripts/orchestration/package-worker.mjs
+          test -s plugins/codex/scripts/orchestration/worker-pool.mjs
+          test -s plugins/codex/commands/orchestrate.md
+          test -s plugins/codex/skills/codex-orchestration/SKILL.md
+          test ! -e scripts/phase1-runtime-fixes.py
+          test ! -d .github/phase1-patch
+          test ! -e __schema_probe_should_not_exist__
+          test "$(find .github/workflows -maxdepth 1 -type f -printf '%f\n' | sort)" = "pull-request-ci.yml"
+          if git grep -nE 'sandbox:[[:space:]]*["'"'"'`]danger-full-access|git worktree add|refs/codex-orchestration/snapshots' -- plugins/codex/scripts/orchestration; then
+            echo "Phase 2/3 write implementation leaked into Phase 1."
+            exit 61
+          fi
