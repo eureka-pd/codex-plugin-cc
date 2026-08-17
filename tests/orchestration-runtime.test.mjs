@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import process from "node:process";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -114,14 +115,32 @@ rl.on("line", (line) => {
   }
 });`
   );
+
+  if (process.platform === "win32") {
+    fs.writeFileSync(
+      path.join(binDir, "codex.cmd"),
+      `@echo off\r\n"${process.execPath}" "%~dp0codex" %*\r\n`,
+      "utf8"
+    );
+  }
 }
 
 function run(args, env) {
-  return spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8", env, cwd: env.WORKSPACE });
+  return spawnSync(process.execPath, [CLI, ...args], {
+    encoding: "utf8",
+    env,
+    cwd: env.WORKSPACE
+  });
 }
 
 function buildPlan(packages) {
-  return { version: 1, objective: "runtime", complexityScore: 5, requestedBy: { explicit: true, sessionId: null }, packages };
+  return {
+    version: 1,
+    objective: "runtime",
+    complexityScore: 5,
+    requestedBy: { explicit: true, sessionId: null },
+    packages
+  };
 }
 
 function buildPackage(id, dependencies = [], objective = `delay-250 ${id}`) {
@@ -165,19 +184,33 @@ test("runs independent Codex Roots concurrently and isolates results", async () 
   const pluginDataDir = makeTempDir();
   const eventFile = path.join(pluginDataDir, "events.jsonl");
   installFake(binDir, eventFile);
-  const env = { ...process.env, PATH: `${binDir}${path.delimiter}${process.env.PATH}`, CLAUDE_PLUGIN_DATA: pluginDataDir, WORKSPACE: workspace };
+  const env = {
+    ...process.env,
+    PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
+    CLAUDE_PLUGIN_DATA: pluginDataDir,
+    WORKSPACE: workspace
+  };
   const planFile = path.join(workspace, "plan.json");
-  fs.writeFileSync(planFile, JSON.stringify(buildPlan([
-    buildPackage("pkg-a"),
-    buildPackage("pkg-b"),
-    buildPackage("pkg-c", ["pkg-a", "pkg-b"], "delay-20 pkg-c")
-  ])));
+  fs.writeFileSync(
+    planFile,
+    JSON.stringify(
+      buildPlan([
+        buildPackage("pkg-a"),
+        buildPackage("pkg-b"),
+        buildPackage("pkg-c", ["pkg-a", "pkg-b"], "delay-20 pkg-c")
+      ])
+    )
+  );
 
   const launch = run(["start", "--cwd", workspace, "--plan-file", planFile, "--json"], env);
   assert.equal(launch.status, 0, launch.stderr);
   const orchestrationId = JSON.parse(launch.stdout).orchestrationId;
-  const state = await waitFor(orchestrationId, env, (value) => ["completed", "degraded", "failed"].includes(value.status));
-  assert.equal(state.status, "completed");
+  const state = await waitFor(
+    orchestrationId,
+    env,
+    (value) => ["completed", "degraded", "failed"].includes(value.status)
+  );
+  assert.equal(state.status, "completed", JSON.stringify(state, null, 2));
 
   const resultResponse = run(["result", orchestrationId, "--cwd", workspace, "--json"], env);
   assert.equal(resultResponse.status, 0, resultResponse.stderr);
@@ -186,11 +219,19 @@ test("runs independent Codex Roots concurrently and isolates results", async () 
   assert.equal(result.packages[1].result.claims[0], "claim-pkg-b");
 
   const events = fs.readFileSync(eventFile, "utf8").trim().split(/\n/).map(JSON.parse);
-  const starts = events.filter((entry) => entry.type === "turn-started" && ["pkg-a", "pkg-b"].includes(entry.packageId));
-  const completions = events.filter((entry) => entry.type === "turn-completed" && ["pkg-a", "pkg-b"].includes(entry.packageId));
+  const starts = events.filter(
+    (entry) => entry.type === "turn-started" && ["pkg-a", "pkg-b"].includes(entry.packageId)
+  );
+  const completions = events.filter(
+    (entry) => entry.type === "turn-completed" && ["pkg-a", "pkg-b"].includes(entry.packageId)
+  );
   assert.equal(starts.length, 2);
   assert.equal(new Set(starts.map((entry) => entry.pid)).size, 2);
-  assert.equal(Math.max(...starts.map((entry) => entry.time)) < Math.min(...completions.map((entry) => entry.time)), true);
+  assert.equal(
+    Math.max(...starts.map((entry) => entry.time))
+      < Math.min(...completions.map((entry) => entry.time)),
+    true
+  );
   await shutdown(workspace, env);
 });
 
@@ -200,14 +241,26 @@ test("cancels an active orchestration with a soft turn interrupt", async () => {
   const pluginDataDir = makeTempDir();
   const eventFile = path.join(pluginDataDir, "events.jsonl");
   installFake(binDir, eventFile);
-  const env = { ...process.env, PATH: `${binDir}${path.delimiter}${process.env.PATH}`, CLAUDE_PLUGIN_DATA: pluginDataDir, WORKSPACE: workspace };
+  const env = {
+    ...process.env,
+    PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
+    CLAUDE_PLUGIN_DATA: pluginDataDir,
+    WORKSPACE: workspace
+  };
   const planFile = path.join(workspace, "plan.json");
-  fs.writeFileSync(planFile, JSON.stringify(buildPlan([buildPackage("pkg-long", [], "delay-5000 pkg-long")])));
+  fs.writeFileSync(
+    planFile,
+    JSON.stringify(buildPlan([buildPackage("pkg-long", [], "delay-5000 pkg-long")]))
+  );
 
   const launch = run(["start", "--cwd", workspace, "--plan-file", planFile, "--json"], env);
   assert.equal(launch.status, 0, launch.stderr);
   const orchestrationId = JSON.parse(launch.stdout).orchestrationId;
-  await waitFor(orchestrationId, env, (value) => value.packages?.["pkg-long"]?.status === "running");
+  await waitFor(
+    orchestrationId,
+    env,
+    (value) => value.packages?.["pkg-long"]?.status === "running"
+  );
 
   const cancel = run(["cancel", orchestrationId, "--cwd", workspace, "--json"], env);
   assert.equal(cancel.status, 0, cancel.stderr);
