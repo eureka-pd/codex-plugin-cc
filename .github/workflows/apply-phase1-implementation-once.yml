@@ -1,0 +1,140 @@
+name: Apply Phase 1 Implementation Once
+
+on:
+  push:
+    branches:
+      - feat/claude-native-multi-codex-phase-1
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-phase1-implementation-once
+  cancel-in-progress: false
+
+jobs:
+  apply-verify-merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Locate and apply transferred implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=d58a0dbfeb11feed603b5c531741ff4959dd71de
+
+          if [[ -s plugins/codex/scripts/orchestration/controller.mjs \
+             && -s plugins/codex/scripts/orchestration/worker-pool.mjs \
+             && -s plugins/codex/commands/orchestrate.md ]]; then
+            echo "Implementation files are already present."
+          else
+            mapfile -t parts < <(
+              find . -type f \
+                \( -path './.phase1-upload/*' \
+                -o -path './.github/phase1-upload/*' \
+                -o -name 'phase1-implementation*.part*' \
+                -o -name 'phase1-implementation*.patch*' \
+                -o -name 'phase1-upload*.txt' \) \
+                ! -path './.git/*' \
+                | sort
+            )
+
+            if [[ ${#parts[@]} -eq 0 ]]; then
+              echo "No transferred Phase 1 patch payload was found." >&2
+              echo "Changed files since docs base:" >&2
+              git diff --name-status "$BASE"..HEAD >&2 || true
+              exit 41
+            fi
+
+            printf 'Using payload files:\n%s\n' "${parts[*]}"
+            cat "${parts[@]}" > /tmp/phase1.payload
+
+            if grep -q '^diff --git ' /tmp/phase1.payload; then
+              cp /tmp/phase1.payload /tmp/phase1.patch
+            else
+              base64 --decode /tmp/phase1.payload > /tmp/phase1.patch
+            fi
+
+            grep -q '^diff --git ' /tmp/phase1.patch || {
+              echo "Transferred payload is not a complete Git patch." >&2
+              exit 42
+            }
+
+            git apply --binary --index /tmp/phase1.patch
+          fi
+
+          for required in \
+            plugins/codex/scripts/orchestration/controller.mjs \
+            plugins/codex/scripts/orchestration/controller-server.mjs \
+            plugins/codex/scripts/orchestration/worker-runtime.mjs \
+            plugins/codex/scripts/orchestration/worker-pool.mjs \
+            plugins/codex/scripts/orchestration/state-store.mjs \
+            plugins/codex/commands/orchestrate.md \
+            plugins/codex/skills/codex-orchestration/SKILL.md \
+            tests/orchestration-runtime.test.mjs; do
+            test -s "$required" || { echo "Missing implementation file: $required" >&2; exit 43; }
+          done
+
+          changed=$(git diff --name-only "$BASE" | wc -l | tr -d ' ')
+          test "$changed" -ge 20 || {
+            echo "Implementation diff is unexpectedly small: $changed files" >&2
+            exit 44
+          }
+
+      - name: Remove transfer-only files
+        shell: bash
+        run: |
+          rm -rf .phase1-upload .github/phase1-upload
+          find . -maxdepth 2 -type f \
+            \( -name 'phase1-implementation*.part*' \
+            -o -name 'phase1-implementation*.patch*' \
+            -o -name 'phase1-upload*.txt' \) -delete
+          rm .github/workflows/apply-phase1-implementation-once.yml
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install current Codex CLI
+        run: npm install -g @openai/codex
+
+      - name: Verify version metadata
+        run: npm run check-version
+
+      - name: Run full test suite
+        run: npm test
+
+      - name: Run type-check build
+        run: npm run build
+
+      - name: Verify diff and Phase 1 boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          if git grep -nE 'sandbox:[[:space:]]*["'"'"'`]danger-full-access|git worktree add|refs/codex-orchestration/snapshots' -- plugins/codex/scripts/orchestration; then
+            echo "Phase 2/3 write implementation leaked into the Phase 1 runtime." >&2
+            exit 45
+          fi
+
+      - name: Commit verified implementation and fast-forward branches
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: implement read-only Multi-Codex orchestration"
+          git push origin HEAD:refs/heads/feat/claude-native-multi-codex-phase-1
+          git push origin HEAD:refs/heads/main
