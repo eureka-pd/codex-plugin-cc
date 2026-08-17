@@ -22,7 +22,7 @@ jobs:
       - name: Check out exact feature commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: f3d6d4580890956d452bbacbdd519decf68478dd
+          ref: 5495b519fed30ad17a68f4ef64237834150e7782
           fetch-depth: 0
 
       - name: Set up Node.js
@@ -43,7 +43,7 @@ jobs:
       - name: Run full test suite
         run: npm test
 
-      - name: Repeat concurrency suite twice on Linux
+      - name: Repeat full suite twice on Linux
         if: ${{ matrix.os == 'ubuntu-latest' }}
         shell: bash
         run: |
