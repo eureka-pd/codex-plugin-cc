@@ -1,0 +1,23 @@
+name: Export Source Snapshot
+
+on:
+  push:
+    branches:
+      - tmp/export-phase1-source
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package source
+        run: tar --exclude=.git -czf source.tar.gz .
+      - name: Upload source
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-plugin-cc-source
+          path: source.tar.gz
+          retention-days: 1
