@@ -12,7 +12,30 @@ export function writeExecutable(filePath, source) {
   fs.writeFileSync(filePath, source, { encoding: "utf8", mode: 0o755 });
 }
 
+function ensureWindowsNodeShim(env) {
+  if (process.platform !== "win32") return;
+  const searchPath = env?.PATH ?? process.env.PATH ?? "";
+  for (const directory of searchPath.split(path.delimiter).filter(Boolean)) {
+    const extensionlessNode = path.join(directory, "node");
+    const nodeExe = path.join(directory, "node.exe");
+    const nodeCmd = path.join(directory, "node.cmd");
+    if (
+      fs.existsSync(extensionlessNode)
+      && !fs.existsSync(nodeExe)
+      && !fs.existsSync(nodeCmd)
+    ) {
+      fs.writeFileSync(
+        nodeCmd,
+        `@echo off\r\n"${process.execPath}" %*\r\n`,
+        "utf8"
+      );
+      return;
+    }
+  }
+}
+
 export function run(command, args, options = {}) {
+  ensureWindowsNodeShim(options.env);
   const executable = command === "node" ? process.execPath : command;
   return spawnSync(executable, args, {
     cwd: options.cwd,
