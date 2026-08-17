@@ -23,6 +23,44 @@ replace_once(
 
 replace_once(
     "plugins/codex/scripts/orchestration/package-worker.mjs",
+    '  const client = await CodexAppServerClient.connect(request.workspaceRoot, { disableBroker: true, env: process.env });\n  process.stdin.setEncoding("utf8");',
+    '''  const client = await CodexAppServerClient.connect(request.workspaceRoot, { disableBroker: true, env: process.env });
+  let interruptRequested = false;
+  let interruptSent = false;
+  const sendInterruptIfReady = () => {
+    if (!interruptRequested || interruptSent || !threadId || !turnId) return;
+    interruptSent = true;
+    client.request("turn/interrupt", { threadId, turnId }).catch(() => {
+      interruptSent = false;
+    });
+  };
+  process.stdin.setEncoding("utf8");''',
+)
+
+replace_once(
+    "plugins/codex/scripts/orchestration/package-worker.mjs",
+    '''        if (message.type === "interrupt" && threadId && turnId) {
+          client.request("turn/interrupt", { threadId, turnId }).catch(() => {});
+        }''',
+    '''        if (message.type === "interrupt") {
+          interruptRequested = true;
+          sendInterruptIfReady();
+        }''',
+)
+
+replace_once(
+    "plugins/codex/scripts/orchestration/package-worker.mjs",
+    '''      threadId = normalized.threadId ?? threadId;
+      turnId = normalized.turnId ?? turnId;
+      const message = String(normalized.message ?? "");''',
+    '''      threadId = normalized.threadId ?? threadId;
+      turnId = normalized.turnId ?? turnId;
+      sendInterruptIfReady();
+      const message = String(normalized.message ?? "");''',
+)
+
+replace_once(
+    "plugins/codex/scripts/orchestration/package-worker.mjs",
     '  if (result.status !== 0) throw Object.assign(new Error(result.error?.message ?? result.stderr ?? "Codex package failed."), { code: "CODEX_PACKAGE_FAILED" });',
     '''  if (result.status !== 0) {
     const resultErrorMessage = result.error instanceof Error ? result.error.message : null;
@@ -57,4 +95,4 @@ replace_once(
     '      return { ...(finalPayload ?? {}), workerId, pid: child.pid };',
 )
 
-print("Phase 1 worker lifecycle and type-check fixes applied.")
+print("Phase 1 worker lifecycle, cancellation, and type-check fixes applied.")
