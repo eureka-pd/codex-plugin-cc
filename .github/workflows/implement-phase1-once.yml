@@ -44,7 +44,18 @@ jobs:
             python3 scripts/apply-phase1-implementation-once-part2.py
             python3 scripts/apply-phase1-implementation-once-part3.py
             python3 scripts/repair-phase1-command-compat.py
+            python3 - <<'PY'
+          from pathlib import Path
+          path = Path("scripts/harden-phase1-once.py")
+          source = path.read_text(encoding="utf-8")
+          old = 'block.endswith("\\n  });\\n}")'
+          new = 'block.rstrip().endswith("\\n  });\\n}")'
+          if old not in source and new not in source:
+              raise RuntimeError("Unexpected hardening guard")
+          path.write_text(source.replace(old, new, 1), encoding="utf-8")
+          PY
             python3 scripts/harden-phase1-once.py
+            python3 scripts/phase1-runtime-fixes.py
             python3 scripts/finalize-phase1-once.py
           } 2>&1 | tee -a phase1-finalize.log
 
@@ -112,6 +123,7 @@ jobs:
           rm -f scripts/apply-phase1-implementation-once-part3.py
           rm -f scripts/harden-phase1-once.py
           rm -f scripts/repair-phase1-command-compat.py
+          rm -f scripts/phase1-runtime-fixes.py
           rm -f scripts/finalize-phase1-once.py
           rm -f phase1-finalize.log .phase1-ci-failure.log .phase1-hardening-failure.log
           find . -maxdepth 3 -type f \
