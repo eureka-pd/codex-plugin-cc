@@ -1,4 +1,4 @@
-name: Implement Phase 1 Once
+name: Finalize Phase 1 Implementation Once
 
 on:
   push:
@@ -9,31 +9,44 @@ permissions:
   contents: write
 
 concurrency:
-  group: implement-phase1-once
+  group: finalize-phase1-once
   cancel-in-progress: false
 
 jobs:
-  implement-verify-merge:
-    if: ${{ !contains(github.event.head_commit.message, '[phase1-debug]') }}
+  materialize:
+    name: Materialize and verify product tree
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
 
     steps:
-      - name: Check out feature branch
+      - name: Check out current feature branch
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+          ref: feat/claude-native-multi-codex-phase-1
 
-      - name: Generate Phase 1 implementation
+      - name: Refresh remote feature state
         shell: bash
         run: |
-          set -o pipefail
-          : > .phase1-ci-failure.log
+          set -euo pipefail
+          git fetch origin feat/claude-native-multi-codex-phase-1
+          git reset --hard origin/feat/claude-native-multi-codex-phase-1
+
+      - name: Generate and repair Phase 1 implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > phase1-finalize.log
           {
             python3 scripts/apply-phase1-implementation-once.py
             python3 scripts/apply-phase1-implementation-once-part2.py
             python3 scripts/apply-phase1-implementation-once-part3.py
-          } 2>&1 | tee -a .phase1-ci-failure.log
+            python3 scripts/repair-phase1-command-compat.py
+            python3 scripts/harden-phase1-once.py
+            python3 scripts/finalize-phase1-once.py
+          } 2>&1 | tee -a phase1-finalize.log
 
       - name: Set up Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
@@ -41,27 +54,27 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Install dependencies and Codex CLI
+      - name: Install dependencies and current Codex CLI
         shell: bash
         run: |
-          set -o pipefail
+          set -euo pipefail
           {
             npm ci
             npm install -g @openai/codex
-          } 2>&1 | tee -a .phase1-ci-failure.log
+          } 2>&1 | tee -a phase1-finalize.log
 
-      - name: Verify metadata, tests, and build
+      - name: Run Linux verification gate
         shell: bash
         run: |
-          set -o pipefail
+          set -euo pipefail
           {
             npm run check-version
             npm test
             npm run build
             git diff --check
-          } 2>&1 | tee -a .phase1-ci-failure.log
+          } 2>&1 | tee -a phase1-finalize.log
 
-      - name: Verify implementation and read-only boundary
+      - name: Verify product structure and read-only boundary
         shell: bash
         run: |
           set -euo pipefail
@@ -71,48 +84,122 @@ jobs:
             plugins/codex/scripts/orchestration/package-worker.mjs \
             plugins/codex/scripts/orchestration/worker-pool.mjs \
             plugins/codex/scripts/orchestration/state-store.mjs \
+            plugins/codex/scripts/orchestration/cli.mjs \
             plugins/codex/commands/orchestrate.md \
             plugins/codex/skills/codex-orchestration/SKILL.md \
-            tests/orchestration-contracts.test.mjs; do
-            test -s "$required" || { echo "Missing $required" | tee -a .phase1-ci-failure.log; exit 51; }
+            tests/orchestration-runtime.test.mjs; do
+            test -s "$required" || { echo "Missing implementation file: $required"; exit 51; }
           done
+          test "$(head -c 2 plugins/codex/scripts/orchestration/cli.mjs)" = '#!'
           if git grep -nE 'sandbox:[[:space:]]*["'"'"'`]danger-full-access|git worktree add|refs/codex-orchestration/snapshots' -- plugins/codex/scripts/orchestration; then
-            echo "Phase 2/3 write implementation leaked into Phase 1." | tee -a .phase1-ci-failure.log
+            echo "Phase 2/3 write implementation leaked into Phase 1."
             exit 52
           fi
 
-      - name: Normalize and merge verified implementation
+      - name: Remove transfer-only material
         shell: bash
         run: |
           set -euo pipefail
-          rm -f .phase1-ci-failure.log
+          rm -rf .github/phase1-patch .phase1-upload .github/phase1-upload
+          rm -f __schema_probe_should_not_exist__ __do_not_commit__
+          rm -f .github/workflows/apply-phase1-implementation-once.yml
+          rm -f .github/workflows/apply-phase1-implementation.yml
+          rm -f .github/workflows/harden-phase1-once.yml
+          rm -f .github/workflows/repair-phase1-once.yml
+          rm -f .github/workflows/implement-phase1-once.yml
           rm -f scripts/apply-phase1-implementation-once.py
           rm -f scripts/apply-phase1-implementation-once-part2.py
           rm -f scripts/apply-phase1-implementation-once-part3.py
-          rm -f .github/workflows/apply-phase1-implementation-once.yml
-          rm -f .github/workflows/implement-phase1-once.yml
-          rm -rf .phase1-upload .github/phase1-upload
-          find . -maxdepth 2 -type f \
+          rm -f scripts/harden-phase1-once.py
+          rm -f scripts/repair-phase1-command-compat.py
+          rm -f scripts/finalize-phase1-once.py
+          rm -f phase1-finalize.log .phase1-ci-failure.log .phase1-hardening-failure.log
+          find . -maxdepth 3 -type f \
             \( -name 'phase1-implementation*.part*' \
             -o -name 'phase1-implementation*.patch*' \
             -o -name 'phase1-upload*.txt' \
-            -o -name '__schema_probe_should_not_exist__' \
-            -o -name '__do_not_commit__' \) -delete
+            -o -name '.phase1-*.log' \) -delete
+
+      - name: Commit verified product tree
+        id: commit
+        shell: bash
+        run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "feat: implement read-only Multi-Codex orchestration"
+          git diff --cached --check
+          git commit -m "feat: add read-only Claude-native Multi-Codex orchestration"
+          sha=$(git rev-parse HEAD)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
           git push origin HEAD:refs/heads/feat/claude-native-multi-codex-phase-1
-          git push origin HEAD:refs/heads/main
 
-      - name: Preserve diagnostic log on failure
+      - name: Upload diagnostics on failure
         if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: phase1-finalize-diagnostics
+          path: phase1-finalize.log
+          if-no-files-found: ignore
+          retention-days: 3
+
+  cross-platform:
+    name: Verify ${{ matrix.os }}
+    needs: materialize
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out verified feature commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.materialize.outputs.sha }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install current Codex CLI
+        run: npm install -g @openai/codex
+
+      - name: Verify version metadata
+        run: npm run check-version
+
+      - name: Run full test suite
+        run: npm test
+
+      - name: Run type-check build
+        run: npm run build
+
+  merge:
+    name: Fast-forward main
+    needs: [materialize, cross-platform]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          ref: feat/claude-native-multi-codex-phase-1
+
+      - name: Verify exact commit and fast-forward main
         shell: bash
         run: |
-          set +e
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          test -f .phase1-ci-failure.log || echo "Workflow failed before a diagnostic log was created." > .phase1-ci-failure.log
-          git add .phase1-ci-failure.log
-          git commit -m "chore: preserve Phase 1 CI failure [phase1-debug]"
-          git push origin HEAD:refs/heads/feat/claude-native-multi-codex-phase-1
+          set -euo pipefail
+          git fetch origin main feat/claude-native-multi-codex-phase-1
+          git reset --hard origin/feat/claude-native-multi-codex-phase-1
+          test "$(git rev-parse HEAD)" = "${{ needs.materialize.outputs.sha }}"
+          git merge-base --is-ancestor origin/main HEAD
+          git push origin HEAD:refs/heads/main
