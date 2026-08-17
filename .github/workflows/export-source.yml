@@ -1,4 +1,4 @@
-name: Export Source Snapshot
+name: Verify Final Phase 1 Commit
 
 on:
   push:
@@ -9,18 +9,69 @@ permissions:
   contents: read
 
 jobs:
-  export:
-    runs-on: ubuntu-latest
+  verify:
+    name: Verify ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Check out exact feature commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: feat/claude-native-multi-codex-phase-1
+          ref: 48c09df5fed6b19be909fc9590dfcba21da04596
           fetch-depth: 0
-      - name: Package source
-        run: git archive --format=tar.gz -o source.tar.gz HEAD
-      - name: Upload source
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
-          name: codex-plugin-cc-phase1-source
-          path: source.tar.gz
-          retention-days: 1
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install current Codex CLI
+        run: npm install -g @openai/codex
+
+      - name: Verify version metadata
+        run: npm run check-version
+
+      - name: Run full test suite
+        run: npm test
+
+      - name: Repeat concurrency suite twice on Linux
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm test
+          npm test
+
+      - name: Run type-check build
+        run: npm run build
+
+      - name: Verify committed diff and Phase 1 boundary
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          base=$(git merge-base origin/main HEAD)
+          git diff --check "$base" HEAD
+          test -s plugins/codex/scripts/orchestration/controller.mjs
+          test -s plugins/codex/scripts/orchestration/package-worker.mjs
+          test -s plugins/codex/scripts/orchestration/worker-pool.mjs
+          test -s plugins/codex/commands/orchestrate.md
+          test -s plugins/codex/skills/codex-orchestration/SKILL.md
+          test ! -e scripts/phase1-runtime-fixes.py
+          test ! -d .github/phase1-patch
+          test ! -e __schema_probe_should_not_exist__
+          test "$(find .github/workflows -maxdepth 1 -type f -printf '%f\n' | sort)" = "pull-request-ci.yml"
+          if git grep -nE 'sandbox:[[:space:]]*["'"'"'`]danger-full-access|git worktree add|refs/codex-orchestration/snapshots' -- plugins/codex/scripts/orchestration; then
+            echo "Phase 2/3 write implementation leaked into Phase 1."
+            exit 61
+          fi
