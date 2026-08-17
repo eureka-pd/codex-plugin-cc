@@ -1,0 +1,26 @@
+name: Generate App Server Types
+
+on:
+  push:
+    branches:
+      - tmp/export-phase1-source
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install -g @openai/codex
+      - run: mkdir -p plugins/codex/.generated/app-server-types && codex app-server generate-ts --out plugins/codex/.generated/app-server-types
+      - run: tar -czf app-server-types.tar.gz -C plugins/codex/.generated app-server-types
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-server-types
+          path: app-server-types.tar.gz
+          retention-days: 1
