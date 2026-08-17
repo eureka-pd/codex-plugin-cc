@@ -1,6 +1,6 @@
 name: Apply Phase 1 Implementation
 
-# Patch chunks have been blob-verified; this update triggers the application run.
+# Every patch chunk now matches its verified local Git blob; run the atomic application.
 on:
   push:
     branches:
