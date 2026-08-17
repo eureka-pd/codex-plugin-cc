@@ -1,6 +1,6 @@
 name: Apply Phase 1 Implementation
 
-# All verified patch chunks are present; this update triggers the application run.
+# Patch chunks have been blob-verified; this update triggers the application run.
 on:
   push:
     branches:
