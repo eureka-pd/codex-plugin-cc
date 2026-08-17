@@ -4,11 +4,12 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { buildEnv, installFakeCodex } from "./fake-codex-fixture.mjs";
 import { initGitRepo, makeTempDir } from "./helpers.mjs";
 import { withBrokerLock } from "../plugins/codex/scripts/lib/broker-lock.mjs";
+import { createBrokerEndpoint, parseBrokerEndpoint } from "../plugins/codex/scripts/lib/broker-endpoint.mjs";
 import {
   loadBrokerSession,
   loadReusableBrokerSession,
@@ -17,11 +18,19 @@ import {
 import { resolveStateDir } from "../plugins/codex/scripts/lib/state.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const BROKER_LIFECYCLE = path.join(ROOT, "plugins", "codex", "scripts", "lib", "broker-lifecycle.mjs");
+const BROKER_LIFECYCLE = path.join(
+  ROOT,
+  "plugins",
+  "codex",
+  "scripts",
+  "lib",
+  "broker-lifecycle.mjs"
+);
+const BROKER_LIFECYCLE_URL = pathToFileURL(BROKER_LIFECYCLE).href;
 
 function startEnsureProcess(cwd, env) {
   const source = [
-    `import { ensureBrokerSession } from ${JSON.stringify(BROKER_LIFECYCLE)};`,
+    `import { ensureBrokerSession } from ${JSON.stringify(BROKER_LIFECYCLE_URL)};`,
     "const session = await ensureBrokerSession(process.cwd());",
     "console.log(JSON.stringify(session));"
   ].join("\n");
@@ -39,8 +48,12 @@ function startEnsureProcess(cwd, env) {
   });
 }
 
-async function startProbeBroker(socketPath, { busy, shutdownResponseChunks = ['{"id":1,"result":{}}\n'] }) {
+async function startProbeBroker(endpoint, { busy, shutdownResponseChunks = ['{"id":1,"result":{}}\n'] }) {
   const requests = [];
+  const target = parseBrokerEndpoint(endpoint);
+  if (target.kind === "unix") {
+    fs.rmSync(target.path, { force: true });
+  }
   const server = net.createServer((socket) => {
     socket.setEncoding("utf8");
     let buffer = "";
@@ -51,9 +64,7 @@ async function startProbeBroker(socketPath, { busy, shutdownResponseChunks = ['{
         const line = buffer.slice(0, newlineIndex);
         buffer = buffer.slice(newlineIndex + 1);
         newlineIndex = buffer.indexOf("\n");
-        if (!line.trim()) {
-          continue;
-        }
+        if (!line.trim()) continue;
         const message = JSON.parse(line);
         requests.push(message.method);
         if (message.method === "initialize") {
@@ -65,19 +76,17 @@ async function startProbeBroker(socketPath, { busy, shutdownResponseChunks = ['{
               : '{"id":2,"result":{"data":[],"nextCursor":null}}\n'
           );
         } else if (message.method === "broker/shutdown") {
-          for (const chunk of shutdownResponseChunks) {
-            socket.write(chunk);
-          }
+          for (const chunk of shutdownResponseChunks) socket.write(chunk);
         }
       }
     });
   });
-  await new Promise((resolve) => server.listen(socketPath, resolve));
+  await new Promise((resolve) => server.listen(target.path, resolve));
   return {
     requests,
     close: async () => {
       await new Promise((resolve) => server.close(resolve));
-      fs.rmSync(socketPath, { force: true });
+      if (target.kind === "unix") fs.rmSync(target.path, { force: true });
     }
   };
 }
@@ -120,8 +129,8 @@ test("stale reachable brokers are preserved when the broker reports an active tu
   const repo = makeTempDir();
   const binDir = makeTempDir();
   const sessionDir = makeTempDir();
-  const socketPath = path.join(sessionDir, "broker.sock");
-  const probeBroker = await startProbeBroker(socketPath, { busy: true });
+  const endpoint = createBrokerEndpoint(sessionDir);
+  const probeBroker = await startProbeBroker(endpoint, { busy: true });
   installFakeCodex(binDir, "review-ok", "codex-cli 0.144.0");
   initGitRepo(repo);
 
@@ -131,7 +140,7 @@ test("stale reachable brokers are preserved when the broker reports an active tu
     path.join(stateDir, "broker.json"),
     `${JSON.stringify(
       {
-        endpoint: `unix:${socketPath}`,
+        endpoint,
         pidFile: path.join(sessionDir, "broker.pid"),
         logFile: path.join(sessionDir, "broker.log"),
         sessionDir,
@@ -162,12 +171,12 @@ test("stale reachable brokers are preserved when the broker reports an active tu
 
 test("broker shutdown accepts a response split across socket chunks", async () => {
   const sessionDir = makeTempDir();
-  const socketPath = path.join(sessionDir, "broker.sock");
-  const probeBroker = await startProbeBroker(socketPath, {
+  const endpoint = createBrokerEndpoint(sessionDir);
+  const probeBroker = await startProbeBroker(endpoint, {
     busy: false,
     shutdownResponseChunks: ['{"id":1,"result":', '{}', '}\n']
   });
 
-  assert.equal(await sendBrokerShutdown(`unix:${socketPath}`), true);
+  assert.equal(await sendBrokerShutdown(endpoint), true);
   await probeBroker.close();
 });
