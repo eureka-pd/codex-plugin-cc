@@ -1,0 +1,118 @@
+name: Implement Phase 1 Once
+
+on:
+  push:
+    branches:
+      - feat/claude-native-multi-codex-phase-1
+
+permissions:
+  contents: write
+
+concurrency:
+  group: implement-phase1-once
+  cancel-in-progress: false
+
+jobs:
+  implement-verify-merge:
+    if: ${{ !contains(github.event.head_commit.message, '[phase1-debug]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Generate Phase 1 implementation
+        shell: bash
+        run: |
+          set -o pipefail
+          : > .phase1-ci-failure.log
+          {
+            python3 scripts/apply-phase1-implementation-once.py
+            python3 scripts/apply-phase1-implementation-once-part2.py
+            python3 scripts/apply-phase1-implementation-once-part3.py
+          } 2>&1 | tee -a .phase1-ci-failure.log
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies and Codex CLI
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            npm ci
+            npm install -g @openai/codex
+          } 2>&1 | tee -a .phase1-ci-failure.log
+
+      - name: Verify metadata, tests, and build
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            npm run check-version
+            npm test
+            npm run build
+            git diff --check
+          } 2>&1 | tee -a .phase1-ci-failure.log
+
+      - name: Verify implementation and read-only boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          for required in \
+            plugins/codex/scripts/orchestration/controller.mjs \
+            plugins/codex/scripts/orchestration/controller-server.mjs \
+            plugins/codex/scripts/orchestration/package-worker.mjs \
+            plugins/codex/scripts/orchestration/worker-pool.mjs \
+            plugins/codex/scripts/orchestration/state-store.mjs \
+            plugins/codex/commands/orchestrate.md \
+            plugins/codex/skills/codex-orchestration/SKILL.md \
+            tests/orchestration-contracts.test.mjs; do
+            test -s "$required" || { echo "Missing $required" | tee -a .phase1-ci-failure.log; exit 51; }
+          done
+          if git grep -nE 'sandbox:[[:space:]]*["'"'"'`]danger-full-access|git worktree add|refs/codex-orchestration/snapshots' -- plugins/codex/scripts/orchestration; then
+            echo "Phase 2/3 write implementation leaked into Phase 1." | tee -a .phase1-ci-failure.log
+            exit 52
+          fi
+
+      - name: Normalize and merge verified implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .phase1-ci-failure.log
+          rm -f scripts/apply-phase1-implementation-once.py
+          rm -f scripts/apply-phase1-implementation-once-part2.py
+          rm -f scripts/apply-phase1-implementation-once-part3.py
+          rm -f .github/workflows/apply-phase1-implementation-once.yml
+          rm -f .github/workflows/implement-phase1-once.yml
+          rm -rf .phase1-upload .github/phase1-upload
+          find . -maxdepth 2 -type f \
+            \( -name 'phase1-implementation*.part*' \
+            -o -name 'phase1-implementation*.patch*' \
+            -o -name 'phase1-upload*.txt' \
+            -o -name '__schema_probe_should_not_exist__' \
+            -o -name '__do_not_commit__' \) -delete
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: implement read-only Multi-Codex orchestration"
+          git push origin HEAD:refs/heads/feat/claude-native-multi-codex-phase-1
+          git push origin HEAD:refs/heads/main
+
+      - name: Preserve diagnostic log on failure
+        if: ${{ failure() }}
+        shell: bash
+        run: |
+          set +e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          test -f .phase1-ci-failure.log || echo "Workflow failed before a diagnostic log was created." > .phase1-ci-failure.log
+          git add .phase1-ci-failure.log
+          git commit -m "chore: preserve Phase 1 CI failure [phase1-debug]"
+          git push origin HEAD:refs/heads/feat/claude-native-multi-codex-phase-1
