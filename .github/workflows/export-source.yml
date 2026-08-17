@@ -22,7 +22,7 @@ jobs:
       - name: Check out exact feature commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: 48c09df5fed6b19be909fc9590dfcba21da04596
+          ref: f3d6d4580890956d452bbacbdd519decf68478dd
           fetch-depth: 0
 
       - name: Set up Node.js
