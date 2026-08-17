@@ -1,6 +1,6 @@
 name: Apply Phase 1 Implementation
 
-# Every patch chunk now matches its verified local Git blob; run the atomic application.
+# The reconstructed Base64 length and every corrected blob now match the verified local source.
 on:
   push:
     branches:
@@ -31,6 +31,7 @@ jobs:
         run: |
           set -euo pipefail
           cat .github/phase1-patch/part-* > /tmp/phase1.patch.gz.b64
+          test "$(wc -c < /tmp/phase1.patch.gz.b64)" -eq 84328
           base64 --decode /tmp/phase1.patch.gz.b64 | gzip --decompress > /tmp/phase1.patch
           echo "be6c9f74653c422ce50793c7ed41bd9c1044a50bb8645303828c3101d8dcbc6f  /tmp/phase1.patch" | sha256sum --check -
           git apply --index /tmp/phase1.patch
