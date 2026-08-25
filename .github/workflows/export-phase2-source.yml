@@ -27,3 +27,17 @@ jobs:
             !node_modules
           include-hidden-files: true
           retention-days: 1
+
+      - name: Install current Codex CLI
+        run: npm install -g @openai/codex
+
+      - name: Generate App Server types
+        run: npm run prebuild
+
+      - name: Upload generated App Server types
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-app-server-types
+          path: plugins/codex/.generated/app-server-types
+          include-hidden-files: true
+          retention-days: 1
